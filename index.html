@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Cotizador Pro con IA - Ecomoving</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+  <style>
+    :root { --primary: #10b981; --dark: #1e293b; --light: #f8fafc; }
+    .dark { --primary: #34d399; --dark: #f8fafc; --light: #1e293b; background:#0f172a; color:white; }
+    body { font-family: system-ui, sans-serif; background: var(--light); color: var(--dark); margin:0; padding:0; transition:0.3s; }
+    header { background: var(--primary); color:white; padding:20px; text-align:center; position:relative; }
+    .logo { height:70px; vertical-align:middle; margin-right:12px; border-radius:10px; }
+    main { max-width:960px; margin:20px auto; padding:20px; background:white; border-radius:16px; box-shadow:0 15px 40px rgba(0,0,0,0.1); }
+    .dark main { background:#1e293b; }
+    input, select, textarea { width:100%; padding:12px; margin:8px 0; border:1px solid #ccc; border-radius:10px; box-sizing:border-box; }
+    table { width:100%; border-collapse:collapse; margin:25px 0; }
+    th, td { padding:14px; text-align:left; border-bottom:1px solid #ddd; }
+    .dark td, .dark th { border-color:#444; }
+    button { background:var(--primary); color:white; border:none; padding:12px 24px; margin:8px 4px; border-radius:10px; cursor:pointer; font-weight:bold; }
+    button:hover { opacity:0.9; }
+    .suggest-btn { background:#6366f1; font-size:0.85em; padding:6px 12px; }
+    }
+    .actions { text-align:center; margin:40px 0; }
+    .cotizacion-card { background:#ecfdf5; padding:18px; margin:12px 0; border-radius:12px; cursor:pointer; border-left:5px solid var(--primary); }
+    .dark .cotizacion-card { background:#166534; }
+    #total { font-size:2em; font-weight:bold; }
+  </style>
+</head>
+<body>
+  <header>
+    <img src="https://via.placeholder.com/180x70/10b981/ffffff?text=ECOMOVING" alt="Logo" class="logo">
+    <h1>Cotizador Profesional con IA</h1>
+    <button onclick="document.body.classList.toggle('dark')" style="position:absolute;right:20px;top:25px;background:transparent;border:none;font-size:28px;">
+      <i class="fas fa-moon"></i>
+    </button>
+  </header>
+
+  <main>
+    <form id="formCotizacion">
+      <h2>Datos del Cliente</h2>
+      <input type="text" id="cliente" placeholder="Nombre del cliente o empresa" required>
+      <input type="tel" id="telefono" placeholder="Teléfono / WhatsApp">
+      <input type="email" id="email" placeholder="Email">
+      <input type="text" id="direccion" placeholder="Dirección (opcional)">
+
+      <h2>Productos / Servicios</h2>
+      <table id="tablaProductos">
+        <thead><tr><th>Descripción</th><th>Cant.</th><th>Precio Unit. (IA)</th><th>Desc. %</th><th>Subtotal</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <button type="button" onclick="agregarFila()">+ Añadir producto</button>
+
+      <div style="float:right;font-size:1.5em;margin-top:30px;">
+        <div>Subtotal: $<span id="subtotal">0.00</span></div>
+        <div>IVA <span id="ivaPorc">19</span>%: $<span id="iva">0.00</span></div>
+        <div><strong>Total: $<span id="total">0.00</span></strong></div>
+      </div>
+      <div style="clear:both;"></div>
+
+      <div class="actions">
+        <button type="button" onclick="guardarCotizacion()">Guardar</button>
+        <button type="button" onclick="enviarWhatsApp()">WhatsApp</button>
+        <button type="button" onclick="enviarEmail()">Email</button>
+        <button type="button" onclick="generarPDF()">PDF</button>
+      </div>
+    </form>
+
+    <div id="historial">
+      <h2>Historial</h2>
+      <div id="listaHistorial"></div>
+    </div>
+  </main>
+
+  <script>
+    const tbody = document.querySelector("#tablaProductos tbody");
+    // <<<=== AQUÍ PON TU CLAVE DE xAI[](https://x.ai/api) ===>>>
+    const API_KEY = 'tu-clave-api-aqui';
+    const API_URL = 'https://api.x.ai/v1/chat/completions';
+    const MODEL = 'grok-3-mini';
+
+    function agregarFila(desc="", cant=1, precio=0, descu=0) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td><input type="text" value="${desc}" class="desc" oninput="calcular()"></td>
+        <td><input type="number" value="${cant}" min="1" class="cant" oninput="calcular()"></td>
+        <td style="position:relative;">
+          <input type="number" value="${precio}" step="0.01" class="precio" oninput="calcular()">
+          <button class="suggest-btn" onclick="sugerirPrecio(this)">IA</button>
+        </td>
+        <td><input type="number" value="${descu}" min="0" max="100" class="descuento" oninput="calcular()"></td>
+        <td class="subtotal">0.00</td>
+        <td><button type="button" onclick="this.parentElement.parentElement.remove();calcular()">Remove</button></td>
+      `;
+      tbody.appendChild(tr);
+    }
+
+    async function sugerirPrecio(btn) {
+      if (API_KEY === 'tu-clave-api-aqui') {
+        alert("Primero pega tu clave API de xAI en el código (línea 85 aprox.)");
+        return;
+      }
+      const tr = btn.closest("tr");
+      const desc = tr.querySelector(".desc").value.trim();
+      if (!desc) return alert("Escribe la descripción del producto");
+      const margen = prompt("Margen de ganancia deseado (%)", "35") || "35";
+      const pais = prompt("País", "Chile") || "Chile";
+
+      btn.textContent = "Pensando...";
+      try {
+        const res = await fetch(API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${API_KEY}` },
+          body: JSON.stringify({
+            model: MODEL,
+            messages: [{ role: "user", content: `Precio de venta competitivo para "${desc}" en ${pais} con ${margen}% de margen sobre costo de mercado. Responde SOLO el número.` }],
+            temperature: 0.3
+          })
+        });
+        const data = await res.json();
+        const precio = parseFloat(data.choices[0].message.content.trim());
+        if (!isNaN(precio)) tr.querySelector(".precio").value = precio.toFixed(2);
+        calcular();
+      } catch(e) { alert("Error IA – revisa tu API key"); }
+      btn.textContent = "IA";
+    }
+
+    function calcular() {
+      let sub = 0;
+      document.querySelectorAll("#tablaProductos tbody tr").forEach(tr => {
+        const c = +tr.querySelector(".cant").value || 0;
+        const p = +tr.querySelector(".precio").value || 0;
+        const d = +tr.querySelector(".descuento").value || 0;
+        const linea = c * p * (1 - d/100);
+        tr.querySelector(".subtotal").textContent = linea.toFixed(2);
+        sub += linea;
+      });
+      const ivaRate = +document.getElementById("ivaPorc").textContent / 100;
+      const iva = sub * ivaRate;
+      const tot = sub + iva;
+      document.getElementById("subtotal").textContent = sub.toFixed(2);
+      document.getElementById("iva").textContent = iva.toFixed(2);
+      document.getElementById("total").textContent = tot.toFixed(2);
+    }
+
+    function guardarCotizacion() {
+      const data = {
+        fecha: new Date().toLocaleDateString('es-CL'),
+        cliente: document.getElementById("cliente").value || "Sin nombre",
+        telefono: document.getElementById("telefono").value,
+        email: document.getElementById("email").value,
+        productos: Array.from(tbody.rows).map(r => ({
+          desc: r.cells[0].querySelector("input").value,
+          cant: r.cells[1].querySelector("input").value,
+          precio: r.cells[2].querySelector("input").value,
+          desc: r.cells[3].querySelector("input").value
+        })),
+        subtotal: document.getElementById("subtotal").textContent,
+        iva: document.getElementById("iva").textContent,
+        total: document.getElementById("total").textContent
+      };
+      const historial = JSON.parse(localStorage.getItem("cotizaciones")||"[]");
+      historial.push(data);
+      localStorage.setItem("cotizaciones", JSON.stringify(historial));
+      alert("Cotización guardada");
+      cargarHistorial();
+    }
+
+    function cargarHistorial() {
+      const lista = document.getElementById("listaHistorial");
+      lista.innerHTML = "";
+      JSON.parse(localStorage.getItem("cotizaciones")||"[]").reverse().forEach(c => {
+        const div = document.createElement("div");
+        div.className = "cotizacion-card";
+        div.innerHTML = `<strong>${c.fecha} – ${c.cliente}</strong> → Total: $${c.total}`;
+        div.onclick = () => {
+          if(confirm("¿Cargar esta cotización?")) {
+            document.getElementById("cliente").value = c.cliente;
+            document.getElementById("telefono").value = c.telefono;
+            document.getElementById("email").value = c.email;
+            tbody.innerHTML = "";
+            c.productos.forEach(p => agregarFila(p.desc, p.cant, p.precio, p.desc));
+            calcular();
+          }
+        };
+        lista.appendChild(div);
+      });
+    }
+
+    function enviarWhatsApp() {
+      const tel = document.getElementById("telefono").value.replace(/\D/g,'');
+      if(!tel) return alert("Ingresa número WhatsApp");
+      const texto = `*Cotización Ecomoving*\nCliente: ${document.getElementById("cliente").value||'Cliente'}\nTotal: $${document.getElementById("total").textContent}\nGracias!`;
+      open(`https://wa.me/${tel}?text=${encodeURIComponent(texto)}`);
+    }
+
+    function enviarEmail() {
+      const email = document.getElementById("email").value;
+      if(!email) return alert("Ingresa email");
+      const cuerpo = `Cotización por un total de $${document.getElementById("total").textContent}`;
+      open(`mailto:${email}?subject=Cotización Ecomoving&body=${encodeURIComponent(cuerpo)}`);
+    }
+
+    function generarPDF() {
+      const opt = { margin:1, filename:'Cotizacion-Ecomoving.pdf', image:{type:'jpeg',quality:0.98}, html2canvas:{scale:2}, jsPDF:{unit:'cm',format:'a4'} };
+      html2pdf().set(opt).from(document.querySelector("main")).save();
+    }
+
+    // Inicio
+    agregarFila();
+    cargarHistorial();
+  </script>
+</body>
+</html>
