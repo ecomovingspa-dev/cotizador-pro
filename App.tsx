@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 
 // --- Configuration ---
@@ -7,16 +6,19 @@ const DRIVE_DB_CONFIG = {
   folderName: 'BD_Ecomoving',
   // Master Quotes File (New)
   quotesFileId: '1pU9mnO7NXHFp9PUVP4O548SO79KkJrFbNvRHSppv9-8',
-  quotesSheetName: 'Maestro_Cotizaciones',
+  quotesSheetName: 'Maestro_Cotizaciones', // Sheet name in the file
   // Clients / Accounts
-  accountsFileId: '1jpAhYMnc7xdZ22Wh6SoC9ygTb1lIRA6AAchvmk691Z0',
+  accountsFileId: '1jpAhYMnc7xdZ22Wh6SoC9ygTb1lIRA6AAchvmk691Z0', // Este ID se usa para la DB de Cuentas.
   accountsSheetName: 'Maestro_Cuentas',
   // Contacts
   contactsFileId: '1fFU5t7rmz4XV8FfArzSaoUIXKorZh03UGCqY-7AFkEM',
   contactsSheetName: 'Maestro_Contactos',
   // Users
   usersFolder: 'BD_Ecomoving',
-  usersSheetName: 'Maestro_Usuarios' // Implied standard naming
+  usersSheetName: 'Maestro_Usuarios', // Columns: Nombre, Correo, Celular, Clave, Cargo
+  // Opportunities (Future Use)
+  opportunitiesFolder: 'BD_Ecomoving',
+  opportunitiesSheetName: 'Oportunidades' // Columns: ID, Descripcion_0, Fecha_de_cierre, Estado, Institucion, Presupuesto, Eliminar, Clave, Usuario
 };
 
 // --- Types ---
@@ -28,22 +30,58 @@ interface User {
   phone: string;
   role: string;
   avatar: string;
+  password?: string; // Added for internal auth
+  isProfileComplete?: boolean; // Internal flag
 }
 
+// Updated Client Interface based on Sheet Columns: 
+// Cliente, Sector, Segmento, Web, Estado, Correo, Telefono, Ciudad
 interface Client {
-  id: string;
-  name: string;
-  marketId: string;
-  rut: string;
-  address: string;
+  id: string; // Internal ID
+  cliente: string; // Name
+  sector: string;
+  segmento: string;
+  web: string;
+  estado: string;
+  correo: string;
+  telefono: string;
+  ciudad: string;
 }
 
+// Updated Contact Interface based on Sheet Columns:
+// Email, Nombre, Estado, EtapaEnvio, UltimoEnvio, ProximoEnvio, Segmento, ErrorLog, Celular, Ciudad, Cliente, Departamento, Telefono
 interface Contact {
-  id: string;
-  clientId: string; // Foreign Key linking to Client.id
-  name: string;
+  id: string; // Internal ID
+  clientId: string; // Internal Foreign Key (derived from 'Cliente' column logic in real app)
+  
+  // Sheet Columns
   email: string;
-  phone: string;
+  name: string; // 'Nombre' column
+  estado: string;
+  etapaEnvio: string;
+  ultimoEnvio: string;
+  proximoEnvio: string;
+  segmento: string;
+  errorLog: string;
+  celular: string;
+  ciudad: string;
+  cliente: string; // 'Cliente' Name column
+  departamento: string;
+  telefono: string;
+}
+
+// Interface for Opportunities (Future Implementation)
+// Columns: ID, Descripcion_0, Fecha_de_cierre, Estado, Institucion, Presupuesto, Eliminar, Clave, Usuario
+interface Opportunity {
+  id: string; // ID
+  description0: string; // Descripcion_0
+  closingDate: string; // Fecha_de_cierre
+  status: string; // Estado
+  institution: string; // Institucion
+  budget: number; // Presupuesto
+  shouldDelete: boolean; // Eliminar (assuming boolean flag or string marker)
+  key: string; // Clave
+  user: string; // Usuario
 }
 
 interface QuoteItem {
@@ -67,6 +105,9 @@ interface QuoteCost {
   discountPercent: number;
 }
 
+// Status Definitions updated per user request
+type QuoteStatus = 'Pendiente' | 'Producción' | 'Despachada' | 'Facturada' | 'Perdida';
+
 interface QuoteMaster {
   id: string;
   clientId: string;
@@ -84,6 +125,10 @@ interface ClientInfoState {
   contactId: string;
   contactName: string;
   marketId: string;
+  // Extra display fields
+  city: string;
+  sector: string;
+  phone: string;
 }
 
 interface ExecutiveInfo {
@@ -98,8 +143,6 @@ interface QuoteDocuments {
   factura: string;
 }
 
-type QuoteStatus = 'Pendiente' | 'Enviada' | 'Aprobada' | 'Rechazada' | 'Facturada';
-
 // --- Initial Data ---
 
 const MOCK_USERS: User[] = [
@@ -109,7 +152,9 @@ const MOCK_USERS: User[] = [
     email: 'ana.silva@ecomoving.cl',
     phone: '+56 9 1234 5678',
     role: 'Ejecutiva Senior',
-    avatar: 'https://i.pravatar.cc/150?u=ana'
+    avatar: 'https://i.pravatar.cc/150?u=ana',
+    password: '1234',
+    isProfileComplete: true
   },
   {
     id: 'u2',
@@ -117,7 +162,9 @@ const MOCK_USERS: User[] = [
     email: 'carlos.ruiz@ecomoving.cl',
     phone: '+56 9 8765 4321',
     role: 'Ejecutivo de Ventas',
-    avatar: 'https://i.pravatar.cc/150?u=carlos'
+    avatar: 'https://i.pravatar.cc/150?u=carlos',
+    password: '1234',
+    isProfileComplete: true
   },
   {
     id: 'u3',
@@ -125,26 +172,171 @@ const MOCK_USERS: User[] = [
     email: 'admin@ecomoving.cl',
     phone: '+56 2 2222 2222',
     role: 'Gerencia',
-    avatar: 'https://i.pravatar.cc/150?u=admin'
+    avatar: 'https://i.pravatar.cc/150?u=admin',
+    password: '1234',
+    isProfileComplete: true
+  },
+  // Simulating a user from the sheet who hasn't completed their profile
+  {
+    id: 'u4',
+    name: 'Usuario Nuevo',
+    email: '', // Missing
+    phone: '', // Missing
+    role: '', // Missing
+    avatar: 'https://i.pravatar.cc/150?u=new',
+    password: '1234', // Default
+    isProfileComplete: false
   }
 ];
 
 // Simulating Google Sheets Data for Clients (Maestro_Cuentas)
+// Columns: Cliente, Sector, Segmento, Web, Estado, Correo, Telefono, Ciudad
 const MOCK_CLIENTS: Client[] = [
-  { id: 'c1', name: 'Ecomoving Ltda.', marketId: 'ID-998877', rut: '76.555.444-3', address: 'Av. Providencia 1234' },
-  { id: 'c2', name: 'Minera Escondida', marketId: 'MIN-2024-X', rut: '90.111.222-K', address: 'Antofagasta Ind. 55' },
-  { id: 'c3', name: 'Banco Estado', marketId: 'BE-LIC-001', rut: '60.888.000-1', address: 'Alameda 1111' },
-  { id: 'c4', name: 'Falabella Retail', marketId: '', rut: '77.123.123-9', address: 'Rosas 1550' },
-  { id: 'c5', name: 'Cliente Sin Contactos', marketId: '', rut: '55.555.555-5', address: 'Sin Direccion' },
+  { 
+    id: 'c1', 
+    cliente: 'Ecomoving Ltda.', 
+    sector: 'Retail', 
+    segmento: 'Grande', 
+    web: 'www.ecomoving.cl', 
+    estado: 'Activo',
+    correo: 'contacto@ecomoving.cl',
+    telefono: '+56 2 2233 4455',
+    ciudad: 'Santiago'
+  },
+  { 
+    id: 'c2', 
+    cliente: 'Minera Escondida', 
+    sector: 'Minería', 
+    segmento: 'Corporativo', 
+    web: 'www.minera.cl', 
+    estado: 'Activo',
+    correo: 'adquisiciones@minera.cl',
+    telefono: '+56 55 2222 3333',
+    ciudad: 'Antofagasta'
+  },
+  { 
+    id: 'c3', 
+    cliente: 'Banco Estado', 
+    sector: 'Banca', 
+    segmento: 'Público', 
+    web: 'www.bancoestado.cl', 
+    estado: 'Activo',
+    correo: 'compras@bancoestado.cl',
+    telefono: '+56 2 600 200 7000',
+    ciudad: 'Santiago'
+  },
+  { 
+    id: 'c4', 
+    cliente: 'Falabella Retail', 
+    sector: 'Retail', 
+    segmento: 'Grande', 
+    web: 'www.falabella.cl', 
+    estado: 'Inactivo',
+    correo: 'proveedores@falabella.cl',
+    telefono: '+56 2 2333 3333',
+    ciudad: 'Santiago'
+  },
+  { 
+    id: 'c5', 
+    cliente: 'Cliente Nuevo SPA', 
+    sector: 'Tecnología', 
+    segmento: 'Pyme', 
+    web: 'www.nuevospa.cl', 
+    estado: 'Prospecto',
+    correo: 'hola@nuevospa.cl',
+    telefono: '+56 9 9999 9999',
+    ciudad: 'Concepción'
+  },
 ];
 
 // Simulating Google Sheets Data for Contacts (Maestro_Contactos)
+// Columns: Email, Nombre, Estado, EtapaEnvio, UltimoEnvio, ProximoEnvio, Segmento, ErrorLog, Celular, Ciudad, Cliente, Departamento, Telefono
 const MOCK_CONTACTS: Contact[] = [
-  { id: 'ct1', clientId: 'c1', name: 'Juan Pérez', email: 'jperez@ecomoving.cl', phone: '+56 9 1111 1111' },
-  { id: 'ct2', clientId: 'c2', name: 'Maria Gonzalez', email: 'mgonzalez@minera.cl', phone: '+56 9 2222 2222' },
-  { id: 'ct3', clientId: 'c2', name: 'Roberto Diaz', email: 'rdiaz@minera.cl', phone: '+56 9 3333 3333' },
-  { id: 'ct4', clientId: 'c3', name: 'Patricia Leiva', email: 'pleiva@bancoestado.cl', phone: '+56 9 4444 4444' },
-  { id: 'ct5', clientId: 'c4', name: 'Esteban Quito', email: 'equito@falabella.cl', phone: '+56 9 5555 5555' },
+  { 
+    id: 'ct1', 
+    clientId: 'c1', 
+    cliente: 'Ecomoving Ltda.',
+    name: 'Juan Pérez', 
+    email: 'jperez@ecomoving.cl', 
+    telefono: '+56 2 2222 1111', 
+    celular: '+56 9 1111 1111',
+    estado: 'Suscrito',
+    etapaEnvio: '1',
+    ultimoEnvio: '2023-10-01',
+    proximoEnvio: '2023-11-01',
+    segmento: 'Gerencia',
+    errorLog: '',
+    ciudad: 'Santiago',
+    departamento: 'Comercial'
+  },
+  { 
+    id: 'ct2', 
+    clientId: 'c2', 
+    cliente: 'Minera Escondida',
+    name: 'Maria Gonzalez', 
+    email: 'mgonzalez@minera.cl', 
+    telefono: '+56 55 2222 2222',
+    celular: '+56 9 2222 2222',
+    estado: 'Suscrito',
+    etapaEnvio: '2',
+    ultimoEnvio: '2023-10-05',
+    proximoEnvio: '2023-11-05',
+    segmento: 'Adquisiciones',
+    errorLog: '',
+    ciudad: 'Antofagasta',
+    departamento: 'Compras'
+  },
+  { 
+    id: 'ct3', 
+    clientId: 'c2', 
+    cliente: 'Minera Escondida',
+    name: 'Roberto Diaz', 
+    email: 'rdiaz@minera.cl', 
+    telefono: '+56 55 3333 3333',
+    celular: '+56 9 3333 3333',
+    estado: 'Rebotado',
+    etapaEnvio: '0',
+    ultimoEnvio: '2023-09-01',
+    proximoEnvio: '',
+    segmento: 'Operaciones',
+    errorLog: 'Mailbox full',
+    ciudad: 'Antofagasta',
+    departamento: 'Logística'
+  },
+  { 
+    id: 'ct4', 
+    clientId: 'c3', 
+    cliente: 'Banco Estado',
+    name: 'Patricia Leiva', 
+    email: 'pleiva@bancoestado.cl', 
+    telefono: '+56 2 4444 4444',
+    celular: '+56 9 4444 4444',
+    estado: 'Suscrito',
+    etapaEnvio: '1',
+    ultimoEnvio: '2023-10-10',
+    proximoEnvio: '2023-11-10',
+    segmento: 'Finanzas',
+    errorLog: '',
+    ciudad: 'Santiago',
+    departamento: 'Contabilidad'
+  },
+  { 
+    id: 'ct5', 
+    clientId: 'c4', 
+    cliente: 'Falabella Retail',
+    name: 'Esteban Quito', 
+    email: 'equito@falabella.cl', 
+    telefono: '+56 2 5555 5555',
+    celular: '+56 9 5555 5555',
+    estado: 'Desuscrito',
+    etapaEnvio: '3',
+    ultimoEnvio: '2023-08-15',
+    proximoEnvio: '',
+    segmento: 'Marketing',
+    errorLog: '',
+    ciudad: 'Santiago',
+    departamento: 'Marketing'
+  },
 ];
 
 // --- INITIAL MOCK DATABASE (Simulating Sheets Relationships) ---
@@ -165,8 +357,8 @@ const INITIAL_DB_QUOTES: QuoteMaster[] = [
     clientId: 'c2',
     contactId: 'ct2',
     marketId: 'MIN-2024-X',
-    status: 'Aprobada',
-    docs: { oc: 'OC-555', guia: 'GD-101', factura: '' },
+    status: 'Producción',
+    docs: { oc: 'OC-555', guia: '', factura: '' },
     executiveId: 'u2',
     createdAt: '2023-10-15T14:30:00Z'
   }
@@ -280,430 +472,641 @@ const EditableInput = ({
   />
 );
 
-// Helper for Status Badge Color
+// Helper for Status Badge Color updated
 const getStatusColor = (status: QuoteStatus) => {
   switch(status) {
-    case 'Aprobada': return 'bg-emerald-500/20 text-emerald-400 border-emerald-500/50';
-    case 'Facturada': return 'bg-blue-500/20 text-blue-400 border-blue-500/50';
-    case 'Rechazada': return 'bg-red-500/20 text-red-400 border-red-500/50';
-    case 'Enviada': return 'bg-amber-500/20 text-amber-400 border-amber-500/50';
-    default: return 'bg-slate-700 text-slate-300 border-slate-600';
+    case 'Producción': return 'bg-amber-500/20 text-amber-400 border-amber-500/50'; // Formerly Aprobada equiv
+    case 'Despachada': return 'bg-blue-500/20 text-blue-400 border-blue-500/50';
+    case 'Facturada': return 'bg-emerald-500/20 text-emerald-400 border-emerald-500/50';
+    case 'Perdida': return 'bg-red-500/20 text-red-400 border-red-500/50';
+    default: return 'bg-slate-700 text-slate-300 border-slate-600'; // Pendiente
   }
 };
 
 export default function App() {
-  // --- User / Auth State ---
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
-
-  // --- Database State (In-Memory Simulation) ---
-  // We use refs for the "Backend" so it persists without triggering re-renders directly,
-  // acting like an external server we query.
-  const dbQuotesRef = useRef<QuoteMaster[]>(INITIAL_DB_QUOTES);
-  const dbItemsRef = useRef<QuoteItem[]>(INITIAL_DB_ITEMS);
-  const dbCostsRef = useRef<QuoteCost[]>(INITIAL_DB_COSTS);
-
-  // --- App State ---
-  const [activeQuoteId, setActiveQuoteId] = useState('COT-4738');
-  const [searchTerm, setSearchTerm] = useState('');
-  
-  // Data loaded from mock DB based on activeQuoteId
-  const [items, setItems] = useState<QuoteItem[]>([]);
-  const [costs, setCosts] = useState<QuoteCost[]>([]);
-  
-  const [taxRate, setTaxRate] = useState<number>(19);
-  const [isSaving, setIsSaving] = useState(false);
-  
-  // Status & Docs State
-  const [quoteStatus, setQuoteStatus] = useState<QuoteStatus>('Pendiente');
-  const [quoteDocs, setQuoteDocs] = useState<QuoteDocuments>({ oc: '', guia: '', factura: '' });
-  const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
-  
-  // Temporary State for Modal
-  const [tempStatus, setTempStatus] = useState<QuoteStatus>('Pendiente');
-  const [tempDocs, setTempDocs] = useState<QuoteDocuments>({ oc: '', guia: '', factura: '' });
-
-  // Client Info State
-  const [clientInfo, setClientInfo] = useState<ClientInfoState>({
-    clientId: '',
-    clientName: '',
-    contactId: '',
-    contactName: '',
-    marketId: ''
-  });
-
-  const [executiveInfo, setExecutiveInfo] = useState<ExecutiveInfo>({
-    name: '',
-    email: '',
-    phone: ''
-  });
-
-  // Form States for Adding (Quick Add Row)
-  const [newItem, setNewItem] = useState<Partial<QuoteItem>>({ quantity: 1, unitPrice: 0, description: '' });
-  const [newCost, setNewCost] = useState<Partial<QuoteCost>>({ quantity: 1, unitCost: 0, discountPercent: 0, provider: '', code: '', itemNumber: 1 });
-
-  // --- Effects ---
-
-  // Initialize by loading default quote
-  useEffect(() => {
-    if (currentUser) {
-      loadQuoteData('COT-4738');
-    }
-  }, [currentUser]);
-
-  // Auto-fill executive info when user logs in
-  useEffect(() => {
-    if (currentUser) {
-      setExecutiveInfo({
-        name: currentUser.name,
-        email: currentUser.email,
-        phone: currentUser.phone
-      });
-    }
-  }, [currentUser]);
-
-  // Filter contacts based on selected client
-  const availableContacts = useMemo(() => {
-    if (!clientInfo.clientId) return [];
-    return MOCK_CONTACTS.filter(c => c.clientId === clientInfo.clientId);
-  }, [clientInfo.clientId]);
-
-  // --- Loading Logic ---
-
-  const loadQuoteData = (quoteId: string) => {
-    console.log(`Cargando cotización: ${quoteId}`);
+    // --- User / Auth State ---
+    const [currentUser, setCurrentUser] = useState<User | null>(null);
+    // State for login UI
+    const [selectedUserForLogin, setSelectedUserForLogin] = useState<User | null>(null);
     
-    // 1. Find Master Record in DB Ref
-    const quoteMaster = dbQuotesRef.current.find(q => q.id === quoteId);
-    
-    if (!quoteMaster) {
-      alert(`Cotización ${quoteId} no encontrada en la base de datos simulada.`);
-      return;
-    }
-
-    // 2. Set Header Info
-    setActiveQuoteId(quoteMaster.id);
-    setQuoteStatus(quoteMaster.status);
-    setQuoteDocs(quoteMaster.docs);
-    
-    // 3. Set Client Info (Resolve relationships)
-    const client = MOCK_CLIENTS.find(c => c.id === quoteMaster.clientId);
-    const contact = MOCK_CONTACTS.find(c => c.id === quoteMaster.contactId);
-    
-    setClientInfo({
-      clientId: quoteMaster.clientId,
-      clientName: client?.name || '',
-      contactId: quoteMaster.contactId,
-      contactName: contact?.name || '',
-      marketId: quoteMaster.marketId
+    // Profile Completion State
+    const [showProfileSetup, setShowProfileSetup] = useState(false);
+    const [profileForm, setProfileForm] = useState({
+      email: '',
+      phone: '',
+      role: '',
+      password: ''
     });
 
-    // 4. Filter and Set Items (Relational: Item.quoteId === Quote.id)
-    const relatedItems = dbItemsRef.current.filter(i => i.quoteId === quoteMaster.id);
-    setItems(relatedItems); // We copy them to state for editing
-
-    // 5. Filter and Set Costs (Relational: Cost.quoteId === Quote.id)
-    const relatedCosts = dbCostsRef.current.filter(c => c.quoteId === quoteMaster.id);
-    setCosts(relatedCosts); // We copy them to state for editing
-  };
-
-  const handleSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (searchTerm.trim()) {
-      // Try to load whatever ID was typed (case insensitive for better UX)
-      const targetId = searchTerm.trim();
-      // Check exact match first, then rough match
-      const exactMatch = dbQuotesRef.current.find(q => q.id === targetId);
-      if (exactMatch) {
-        loadQuoteData(exactMatch.id);
+    const attemptLogin = (user: User) => {
+      // Direct Login (Password check bypassed for now per user request)
+      if (!user.email || !user.phone || !user.role || !user.isProfileComplete) {
+         setProfileForm({
+           email: user.email || '',
+           phone: user.phone || '',
+           role: user.role || '',
+           password: user.password || ''
+         });
+         setSelectedUserForLogin(user);
+         setShowProfileSetup(true);
       } else {
-        // Try formatting as COT-XXXX if user just typed numbers
-        const numericMatch = dbQuotesRef.current.find(q => q.id === `COT-${targetId}`);
-        if (numericMatch) {
-          loadQuoteData(numericMatch.id);
+         setCurrentUser(user);
+         setSelectedUserForLogin(null);
+      }
+    };
+
+    const handleSaveProfile = async () => {
+       if (!profileForm.email || !profileForm.phone || !profileForm.role || !profileForm.password) {
+         alert("Por favor complete todos los campos para continuar.");
+         return;
+       }
+
+       if (!selectedUserForLogin) return;
+
+       // 1. Prepare Payload for 'Maestro_Usuarios' Sheet
+       // Columns: Nombre, Correo, Celular, Clave, Cargo
+       const userPayload = {
+         'Nombre': selectedUserForLogin.name,
+         'Correo': profileForm.email,
+         'Celular': profileForm.phone,
+         'Clave': profileForm.password,
+         'Cargo': profileForm.role
+       };
+
+       const fullPayload = {
+          driveConfig: DRIVE_DB_CONFIG,
+          fileTitle: 'Update User Profile',
+          sheets: {
+            [DRIVE_DB_CONFIG.usersSheetName]: [userPayload]
+          }
+       };
+
+       console.log("--- ACTUALIZANDO USUARIO EN DRIVE (SIMULADO) ---");
+       console.log("Payload:", fullPayload);
+
+       await new Promise(resolve => setTimeout(resolve, 1500));
+
+       // 2. Update Local User State
+       const updatedUser: User = {
+         ...selectedUserForLogin,
+         email: profileForm.email,
+         phone: profileForm.phone,
+         role: profileForm.role,
+         password: profileForm.password,
+         isProfileComplete: true
+       };
+
+       // Update Mock DB in memory (so it persists in session)
+       const userIndex = MOCK_USERS.findIndex(u => u.id === updatedUser.id);
+       if (userIndex !== -1) {
+         MOCK_USERS[userIndex] = updatedUser;
+       }
+
+       setCurrentUser(updatedUser);
+       setShowProfileSetup(false);
+       setSelectedUserForLogin(null);
+       alert("Perfil completado y guardado exitosamente.");
+    };
+
+    const handleLogout = () => {
+      if(window.confirm("¿Desea cerrar sesión?")) {
+        setCurrentUser(null);
+      }
+    };
+    
+    // --- Database State (In-Memory Simulation) ---
+    // These Refs act as the "Server DB" for the session.
+    const dbQuotesRef = useRef<QuoteMaster[]>(INITIAL_DB_QUOTES);
+    const dbItemsRef = useRef<QuoteItem[]>(INITIAL_DB_ITEMS);
+    const dbCostsRef = useRef<QuoteCost[]>(INITIAL_DB_COSTS);
+
+    // --- App State ---
+    const [activeQuoteId, setActiveQuoteId] = useState('COT-4738');
+    const [quoteDate, setQuoteDate] = useState<string>(new Date().toISOString());
+    const [searchTerm, setSearchTerm] = useState('');
+  
+    // Data loaded from mock DB based on activeQuoteId
+    const [items, setItems] = useState<QuoteItem[]>([]);
+    const [costs, setCosts] = useState<QuoteCost[]>([]);
+  
+    const [taxRate, setTaxRate] = useState<number>(19);
+    const [isSaving, setIsSaving] = useState(false);
+  
+    // Status & Docs State
+    const [quoteStatus, setQuoteStatus] = useState<QuoteStatus>('Pendiente');
+    const [quoteDocs, setQuoteDocs] = useState<QuoteDocuments>({ oc: '', guia: '', factura: '' });
+    const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
+  
+    // Temporary State for Modal
+    const [tempStatus, setTempStatus] = useState<QuoteStatus>('Pendiente');
+    const [tempDocs, setTempDocs] = useState<QuoteDocuments>({ oc: '', guia: '', factura: '' });
+
+    // Client Info State
+    const [clientInfo, setClientInfo] = useState<ClientInfoState>({
+      clientId: '',
+      clientName: '',
+      contactId: '',
+      contactName: '',
+      marketId: '',
+      city: '',
+      sector: '',
+      phone: ''
+    });
+
+    const [executiveInfo, setExecutiveInfo] = useState<ExecutiveInfo>({
+      name: '',
+      email: '',
+      phone: ''
+    });
+
+    // Form States for Adding
+    const [newItem, setNewItem] = useState<Partial<QuoteItem>>({ quantity: 1, unitPrice: 0, description: '' });
+    const [newCost, setNewCost] = useState<Partial<QuoteCost>>({ quantity: 1, unitCost: 0, discountPercent: 0, provider: '', code: '', itemNumber: 1 });
+
+    // --- Effects ---
+
+    // Initialize by loading default quote
+    useEffect(() => {
+      if (currentUser) {
+        loadQuoteData('COT-4738');
+      }
+    }, [currentUser]);
+
+    // Auto-fill executive info when user logs in
+    useEffect(() => {
+      if (currentUser) {
+        setExecutiveInfo({
+          name: currentUser.name,
+          email: currentUser.email,
+          phone: currentUser.phone
+        });
+      }
+    }, [currentUser]);
+
+    // Filter contacts based on selected client
+    const availableContacts = useMemo(() => {
+      if (!clientInfo.clientId) return [];
+      return MOCK_CONTACTS.filter(c => c.clientId === clientInfo.clientId);
+    }, [clientInfo.clientId]);
+
+    // --- Loading Logic ---
+
+    const loadQuoteData = (quoteId: string) => {
+      console.log(`Cargando cotización: ${quoteId}`);
+    
+      // 1. Find Master Record in DB Ref
+      const quoteMaster = dbQuotesRef.current.find(q => q.id === quoteId);
+    
+      if (!quoteMaster) {
+        if (quoteId !== 'COT-4738') alert(`Cotización ${quoteId} no encontrada.`);
+        return;
+      }
+
+      // 2. Set Header Info
+      setActiveQuoteId(quoteMaster.id);
+      setQuoteDate(quoteMaster.createdAt);
+      
+      // Logic: Expiration check (60 days)
+      // If 60 days passed AND no documents -> Perdida
+      const createdDate = new Date(quoteMaster.createdAt);
+      const today = new Date();
+      const diffTime = Math.abs(today.getTime() - createdDate.getTime());
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      
+      const hasDocs = quoteMaster.docs.oc || quoteMaster.docs.guia || quoteMaster.docs.factura;
+      
+      let finalStatus = quoteMaster.status;
+      if (diffDays > 60 && !hasDocs) {
+          finalStatus = 'Perdida';
+      }
+
+      setQuoteStatus(finalStatus);
+      setQuoteDocs(quoteMaster.docs);
+    
+      // 3. Set Client Info
+      const client = MOCK_CLIENTS.find(c => c.id === quoteMaster.clientId);
+      const contact = MOCK_CONTACTS.find(c => c.id === quoteMaster.contactId);
+    
+      setClientInfo({
+        clientId: quoteMaster.clientId,
+        clientName: client?.cliente || '',
+        contactId: quoteMaster.contactId,
+        contactName: contact?.name || '',
+        marketId: quoteMaster.marketId,
+        city: client?.ciudad || '',
+        sector: client?.sector || '',
+        phone: client?.telefono || ''
+      });
+
+      // 4. Filter and Set Items
+      const relatedItems = dbItemsRef.current.filter(i => i.quoteId === quoteMaster.id);
+      setItems(relatedItems);
+
+      // 5. Filter and Set Costs
+      const relatedCosts = dbCostsRef.current.filter(c => c.quoteId === quoteMaster.id);
+      setCosts(relatedCosts);
+    };
+
+    const handleSearch = (e: React.FormEvent) => {
+      e.preventDefault();
+      if (searchTerm.trim()) {
+        const term = searchTerm.trim().toUpperCase();
+        // Try exact ID match first
+        let quote = dbQuotesRef.current.find(q => q.id.toUpperCase() === term);
+        
+        // Try ID numeric match
+        if (!quote) {
+           quote = dbQuotesRef.current.find(q => q.id.toUpperCase() === `COT-${term}`);
+        }
+        
+        // Try finding by Client Name
+        if (!quote) {
+           const client = MOCK_CLIENTS.find(c => c.cliente.toUpperCase().includes(term));
+           if (client) {
+               // Find the latest quote for this client
+               quote = dbQuotesRef.current.find(q => q.clientId === client.id);
+           }
+        }
+
+        if (quote) {
+          loadQuoteData(quote.id);
+          setSearchTerm(''); // Clear after find
         } else {
-           alert("No se encontró la cotización. Verifique el ID.");
+          alert("No se encontró ninguna cotización relacionada.");
         }
       }
-    }
-  };
-
-  // --- Calculations ---
-
-  const getCostsForItem = (itemNumber: number) => {
-    return costs.filter(c => c.itemNumber === itemNumber);
-  };
-
-  const calculateItemFinancials = (item: QuoteItem) => {
-    const revenue = item.quantity * item.unitPrice;
-    
-    const relatedCosts = getCostsForItem(item.itemNumber);
-    const totalCost = relatedCosts.reduce((acc, cost) => {
-      const costTotal = (cost.quantity * cost.unitCost) * (1 - (cost.discountPercent / 100));
-      return acc + costTotal;
-    }, 0);
-
-    const margin = revenue - totalCost;
-    const marginPercent = revenue > 0 ? (margin / revenue) * 100 : 0;
-
-    return { revenue, totalCost, margin, marginPercent };
-  };
-
-  const globalTotals = useMemo(() => {
-    let totalRev = 0;
-    let totalCost = 0;
-    items.forEach(item => {
-      const fins = calculateItemFinancials(item);
-      totalRev += fins.revenue;
-      totalCost += fins.totalCost;
-    });
-
-    const net = totalRev;
-    const taxAmount = Math.round(net * (taxRate / 100));
-    const totalWithTax = net + taxAmount;
-
-    return {
-      revenue: totalRev, // Neto
-      cost: totalCost,
-      margin: totalRev - totalCost,
-      marginPercent: totalRev > 0 ? ((totalRev - totalCost) / totalRev) * 100 : 0,
-      taxAmount,
-      totalWithTax
     };
-  }, [items, costs, taxRate]);
 
-  // --- Handlers ---
+    // --- Calculations ---
 
-  const handleLogin = (user: User) => {
-    setCurrentUser(user);
-  };
+    const getCostsForItem = (itemNumber: number) => {
+      return costs.filter(c => c.itemNumber === itemNumber);
+    };
 
-  const handleLogout = () => {
-    if (window.confirm("¿Estás seguro de cerrar sesión?")) {
-      setCurrentUser(null);
-    }
-  };
-
-  const handleClientChange = (clientId: string) => {
-    const client = MOCK_CLIENTS.find(c => c.id === clientId);
-    if (client) {
-      setClientInfo({
-        clientId: client.id,
-        clientName: client.name,
-        marketId: client.marketId || '',
-        contactId: '',
-        contactName: '' 
-      });
-    } else {
-      setClientInfo({ clientId: '', clientName: '', marketId: '', contactId: '', contactName: '' });
-    }
-  };
-
-  const handleContactChange = (contactId: string) => {
-    const contact = MOCK_CONTACTS.find(c => c.id === contactId);
-    if (contact) {
-      setClientInfo(prev => ({
-        ...prev,
-        contactId: contact.id,
-        contactName: contact.name
-      }));
-    }
-  };
-
-  const handleNewQuote = () => {
-    if(window.confirm("¿Estás seguro de crear una nueva cotización? Se perderán los cambios no guardados.")) {
-      const randomId = Math.floor(1000 + Math.random() * 9000);
-      setActiveQuoteId(`COT-${randomId}`);
-      setItems([]);
-      setCosts([]);
-      setClientInfo({ clientId: '', clientName: '', contactId: '', contactName: '', marketId: '' });
-      setQuoteStatus('Pendiente');
-      setQuoteDocs({ oc: '', guia: '', factura: '' });
-    }
-  };
-
-  const handleSaveToDrive = async () => {
-    setIsSaving(true);
-    const timestamp = new Date().toISOString();
+    const calculateItemFinancials = (item: QuoteItem) => {
+      const revenue = item.quantity * item.unitPrice;
     
-    // 1. Prepare the payload (Simulation of Sheets API structure)
-    const payload = {
-      driveConfig: DRIVE_DB_CONFIG, 
-      fileTitle: `Cotización ${activeQuoteId} - ${clientInfo.clientName}`,
-      createdBy: currentUser?.email,
-      sheets: {
-        'Maestro_Cotizaciones': [{
-           id: activeQuoteId,
-           fecha: timestamp,
-           cliente: clientInfo.clientName,
-           rut_cliente: MOCK_CLIENTS.find(c => c.id === clientInfo.clientId)?.rut || '',
-           contacto: clientInfo.contactName,
-           id_mercado_publico: clientInfo.marketId,
-           ejecutivo_nombre: executiveInfo.name,
-           ejecutivo_email: executiveInfo.email,
-           estado: quoteStatus,
-           oc: quoteDocs.oc,
-           guia: quoteDocs.guia,
-           factura: quoteDocs.factura,
-           neto: globalTotals.revenue,
-           iva: globalTotals.taxAmount,
-           total: globalTotals.totalWithTax,
-           costo_total: globalTotals.cost,
-           margen: globalTotals.margin,
-           margen_porcentaje: globalTotals.marginPercent
-        }],
-        'Items': items.map(i => ({
-          ...i,
-          quoteId: activeQuoteId,
-          total: i.quantity * i.unitPrice
-        })),
-        'Costos': costs.map(c => ({
-          ...c,
-          quoteId: activeQuoteId,
-          total: (c.quantity * c.unitCost) * (1 - c.discountPercent/100)
-        }))
+      const relatedCosts = getCostsForItem(item.itemNumber);
+      const totalCost = relatedCosts.reduce((acc, cost) => {
+        const costTotal = (cost.quantity * cost.unitCost) * (1 - (cost.discountPercent / 100));
+        return acc + costTotal;
+      }, 0);
+
+      const margin = revenue - totalCost;
+      const marginPercent = revenue > 0 ? (margin / revenue) * 100 : 0;
+
+      return { revenue, totalCost, margin, marginPercent };
+    };
+
+    const globalTotals = useMemo(() => {
+      let totalRev = 0;
+      let totalCost = 0;
+      items.forEach(item => {
+        const fins = calculateItemFinancials(item);
+        totalRev += fins.revenue;
+        totalCost += fins.totalCost;
+      });
+
+      const net = totalRev;
+      const taxAmount = Math.round(net * (taxRate / 100));
+      const totalWithTax = net + taxAmount;
+
+      return {
+        revenue: totalRev,
+        cost: totalCost,
+        margin: totalRev - totalCost,
+        marginPercent: totalRev > 0 ? ((totalRev - totalCost) / totalRev) * 100 : 0,
+        taxAmount,
+        totalWithTax
+      };
+    }, [items, costs, taxRate]);
+
+    // --- Handlers ---
+
+    const handleSaveToDrive = async () => {
+        setIsSaving(true);
+        // Use existing creation date if available to preserve it, or new if somehow lost
+        const timestamp = quoteDate || new Date().toISOString();
+
+        try {
+            // 1. Prepare Payload simulating Google Sheets API structure
+            // Mapping data to specific columns requested: 
+            // 'ID Cotización', 'Cuentas', 'Ejecutiva/o', 'Total Neto', 'IVA', 'Total', 
+            // 'Costo Total', 'mg', 'Ganancias', 'Estado Cotización', 'ID Mercado Público', 
+            // 'NroFactura', 'NroGuia', 'NroOC'
+            
+            const quotesPayload = {
+              'ID Cotización': activeQuoteId,
+              'Cuentas': clientInfo.clientName,
+              'Ejecutiva/o': executiveInfo.name,
+              'Total Neto': globalTotals.revenue,
+              'IVA': globalTotals.taxAmount,
+              'Total': globalTotals.totalWithTax,
+              'Costo Total': globalTotals.cost,
+              'mg': globalTotals.marginPercent / 100, // Stored as decimal for Sheet formatting usually
+              'Ganancias': globalTotals.margin,
+              'Estado Cotización': quoteStatus,
+              'ID Mercado Público': clientInfo.marketId,
+              'NroFactura': quoteDocs.factura,
+              'NroGuia': quoteDocs.guia,
+              'NroOC': quoteDocs.oc
+            };
+
+            const fullPayload = {
+              driveConfig: DRIVE_DB_CONFIG, 
+              fileTitle: `Cotización ${activeQuoteId} - ${clientInfo.clientName}`,
+              createdBy: currentUser?.email,
+              sheets: {
+                [DRIVE_DB_CONFIG.quotesSheetName]: [quotesPayload],
+                // ITEMS PAYLOAD MAPPED TO COLUMNS:
+                // ID Cotización, Imagen, Item, Cantidad, Descripcion, Valor Unitario, SubTotal, mg
+                'Items': items.map(i => {
+                  const financials = calculateItemFinancials(i);
+                  return {
+                    'ID Cotización': activeQuoteId,
+                    'Imagen': i.image,
+                    'Item': i.itemNumber,
+                    'Cantidad': i.quantity,
+                    'Descripcion': i.description,
+                    'Valor Unitario': i.unitPrice,
+                    'SubTotal': financials.revenue,
+                    'mg': financials.marginPercent / 100
+                  };
+                }),
+                // COSTS PAYLOAD MAPPED TO COLUMNS:
+                // ID Cotización, Item, Codigo, Proveedor, Cantidad, Valor Unitario, Descuento, Costos
+                'Costos': costs.map(c => ({
+                  'ID Cotización': activeQuoteId,
+                  'Item': c.itemNumber,
+                  'Codigo': c.code,
+                  'Proveedor': c.provider,
+                  'Cantidad': c.quantity,
+                  'Valor Unitario': c.unitCost,
+                  'Descuento': c.discountPercent / 100,
+                  'Costos': (c.quantity * c.unitCost) * (1 - c.discountPercent/100)
+                }))
+              }
+            };
+            
+            console.log("--- GUARDANDO EN DRIVE (SIMULADO) ---");
+            console.log("Payload Completo:", fullPayload);
+
+            // 2. Update Local DB (For Session Persistence & Search)
+            
+            // Update Master: Remove old version of this quote if exists, add new
+            dbQuotesRef.current = [
+                ...dbQuotesRef.current.filter(q => q.id !== activeQuoteId),
+                {
+                    id: activeQuoteId,
+                    clientId: clientInfo.clientId,
+                    contactId: clientInfo.contactId,
+                    marketId: clientInfo.marketId,
+                    status: quoteStatus,
+                    docs: quoteDocs,
+                    executiveId: currentUser?.id || 'u3',
+                    createdAt: timestamp 
+                }
+            ];
+
+            // Update Items: Remove old items for this quote, add current
+            dbItemsRef.current = [
+                ...dbItemsRef.current.filter(i => i.quoteId !== activeQuoteId),
+                ...items
+            ];
+
+            // Update Costs: Remove old costs for this quote, add current
+            dbCostsRef.current = [
+                ...dbCostsRef.current.filter(c => c.quoteId !== activeQuoteId),
+                ...costs
+            ];
+
+            // Simulate Network Delay
+            await new Promise(resolve => setTimeout(resolve, 800)); 
+            
+            setIsSaving(false);
+            // Notice for user
+            alert(`¡Cotización ${activeQuoteId} guardada exitosamente en la Base de Datos Local!`);
+
+        } catch (error) {
+            setIsSaving(false);
+            console.error("Error al guardar:", error);
+            alert(`ERROR: No se pudo guardar.`);
+        }
+    };
+
+    const handleClientChange = (clientId: string) => {
+      const client = MOCK_CLIENTS.find(c => c.id === clientId);
+      if (client) {
+        setClientInfo({
+          clientId: client.id,
+          clientName: client.cliente,
+          marketId: clientInfo.marketId || '', // Keep existing if switching? No, usually reset or keep.
+          // For a new client, maybe we keep the market ID empty or let user type.
+          // We'll keep the existing logic of keeping it if it's typed, or just placeholder.
+          // But the mock data for clients doesn't have marketId anymore, so we rely on state.
+          contactId: '',
+          contactName: '',
+          city: client.ciudad,
+          sector: client.sector,
+          phone: client.telefono
+        });
+      } else {
+        setClientInfo({ 
+          clientId: '', 
+          clientName: '', 
+          marketId: '', 
+          contactId: '', 
+          contactName: '',
+          city: '',
+          sector: '',
+          phone: '' 
+        });
       }
     };
 
-    console.log(`--- GUARDANDO DATOS EN DB SIMULADA ---`);
-    console.log(payload);
-
-    // 2. SIMULATE SAVING TO DATABASE (Updating Refs)
-    
-    // Update Master Quote
-    const masterIndex = dbQuotesRef.current.findIndex(q => q.id === activeQuoteId);
-    const newMasterRecord: QuoteMaster = {
-      id: activeQuoteId,
-      clientId: clientInfo.clientId,
-      contactId: clientInfo.contactId,
-      marketId: clientInfo.marketId,
-      status: quoteStatus,
-      docs: quoteDocs,
-      executiveId: currentUser?.id || 'unknown',
-      createdAt: masterIndex >= 0 ? dbQuotesRef.current[masterIndex].createdAt : timestamp
+    const handleContactChange = (contactId: string) => {
+      const contact = MOCK_CONTACTS.find(c => c.id === contactId);
+      if (contact) {
+        setClientInfo(prev => ({
+          ...prev,
+          contactId: contact.id,
+          contactName: contact.name
+        }));
+      }
     };
 
-    if (masterIndex >= 0) {
-      dbQuotesRef.current[masterIndex] = newMasterRecord;
-    } else {
-      dbQuotesRef.current.push(newMasterRecord);
+    const handleNewQuote = () => {
+      if(window.confirm("¿Estás seguro de crear una nueva cotización? Se perderán los cambios no guardados.")) {
+        const randomId = Math.floor(1000 + Math.random() * 9000);
+        setActiveQuoteId(`COT-${randomId}`);
+        setQuoteDate(new Date().toISOString());
+        setItems([]);
+        setCosts([]);
+        setClientInfo({ 
+           clientId: '', clientName: '', contactId: '', contactName: '', marketId: '',
+           city: '', sector: '', phone: ''
+        });
+        setQuoteStatus('Pendiente');
+        setQuoteDocs({ oc: '', guia: '', factura: '' });
+      }
+    };
+
+    const openStatusModal = () => {
+      setTempStatus(quoteStatus);
+      setTempDocs(quoteDocs);
+      setIsStatusModalOpen(true);
+    };
+
+    const saveStatusChanges = () => {
+      // Auto transition logic based on inputs
+      let nextStatus = tempStatus;
+      
+      if (tempDocs.factura && tempDocs.factura.trim() !== '') {
+          nextStatus = 'Facturada';
+      } else if (tempDocs.guia && tempDocs.guia.trim() !== '') {
+          nextStatus = 'Despachada';
+      } else if (tempDocs.oc && tempDocs.oc.trim() !== '') {
+          nextStatus = 'Producción';
+      } 
+      
+      setQuoteStatus(nextStatus);
+      setQuoteDocs(tempDocs);
+      setIsStatusModalOpen(false);
+    };
+
+    const updateItem = (id: string, field: keyof QuoteItem, value: any) => {
+      setItems(items.map(i => i.id === id ? { ...i, [field]: value } : i));
+    };
+
+    const updateCost = (id: string, field: keyof QuoteCost, value: any) => {
+      setCosts(costs.map(c => c.id === id ? { ...c, [field]: value } : c));
+    };
+
+    const handleAddItem = () => {
+      const nextItemNum = items.length > 0 ? Math.max(...items.map(i => i.itemNumber)) + 1 : 1;
+      const itemToAdd: QuoteItem = {
+        id: crypto.randomUUID(),
+        quoteId: activeQuoteId,
+        itemNumber: nextItemNum,
+        image: 'https://placehold.co/100x100/png?text=Img', 
+        quantity: newItem.quantity || 1,
+        description: newItem.description || 'Nuevo Item',
+        unitPrice: Number(newItem.unitPrice) || 0
+      };
+      setItems([...items, itemToAdd]);
+      setNewItem({ quantity: 1, unitPrice: 0, description: '' });
+    };
+
+    const handleAddCost = () => {
+      const costToAdd: QuoteCost = {
+        id: crypto.randomUUID(),
+        quoteId: activeQuoteId,
+        itemNumber: Number(newCost.itemNumber) || 1,
+        code: newCost.code || '',
+        provider: newCost.provider || 'Nuevo Prov.',
+        quantity: newCost.quantity || 1,
+        unitCost: Number(newCost.unitCost) || 0,
+        discountPercent: Number(newCost.discountPercent) || 0
+      };
+      setCosts([...costs, costToAdd]);
+      setNewCost({ quantity: 1, unitCost: 0, discountPercent: 0, provider: '', code: '', itemNumber: 1 });
+    };
+
+    const deleteItem = (id: string) => setItems(items.filter(i => i.id !== id));
+    const deleteCost = (id: string) => setCosts(costs.filter(c => c.id !== id));
+
+    const formatCurrency = (val: number) => 
+      new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP' }).format(val);
+
+    const formatPercent = (val: number) => 
+      `${val.toFixed(2)}%`;
+
+    // Login Render
+    if (!currentUser) {
+      return (
+        <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6 font-sans">
+          <div className="w-full max-w-md">
+            <div className="text-center mb-8">
+              <div className="inline-flex items-center justify-center w-16 h-16 bg-indigo-600 rounded-2xl mb-4 shadow-lg shadow-indigo-500/30">
+                 <svg className="w-8 h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+              </div>
+              <h1 className="text-3xl font-bold text-white mb-2">Cotizador Pro</h1>
+              <p className="text-slate-400">Seleccione su usuario para ingresar</p>
+            </div>
+          
+            <div className="bg-slate-800 border border-slate-700 rounded-2xl shadow-xl overflow-hidden divide-y divide-slate-700">
+                {!showProfileSetup ? (
+                  // LIST OF USERS
+                  MOCK_USERS.map(user => (
+                    <button 
+                      key={user.id}
+                      onClick={() => attemptLogin(user)}
+                      className="w-full p-4 flex items-center gap-4 hover:bg-slate-700/50 transition-colors text-left group"
+                    >
+                      <img src={user.avatar} alt={user.name} className="w-12 h-12 rounded-full border-2 border-slate-600 group-hover:border-indigo-500 transition-colors" />
+                      <div>
+                        <div className="text-white font-medium group-hover:text-indigo-400 transition-colors">{user.name}</div>
+                        <div className="text-sm text-slate-500">{user.role || 'Sin Asignar'}</div>
+                      </div>
+                      <div className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity text-indigo-400">
+                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                      </div>
+                    </button>
+                  ))
+                ) : (
+                   // PROFILE SETUP MODAL (In-place)
+                   <div className="p-6 animate-fade-in">
+                     <div className="mb-4 text-center">
+                       <h3 className="text-white font-bold text-lg">Completar Perfil</h3>
+                       <p className="text-xs text-slate-400">Complete sus datos por única vez</p>
+                     </div>
+                     
+                     <form onSubmit={(e) => { e.preventDefault(); handleSaveProfile(); }} className="space-y-3">
+                        <div>
+                           <label className="block text-xs font-medium text-slate-400 mb-1">Correo (Corporativo)</label>
+                           <input type="email" required value={profileForm.email} onChange={e => setProfileForm({...profileForm, email: e.target.value})} className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white text-sm" />
+                        </div>
+                        <div>
+                           <label className="block text-xs font-medium text-slate-400 mb-1">Celular</label>
+                           <input type="tel" required value={profileForm.phone} onChange={e => setProfileForm({...profileForm, phone: e.target.value})} className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white text-sm" placeholder="+56 9..." />
+                        </div>
+                        <div>
+                           <label className="block text-xs font-medium text-slate-400 mb-1">Cargo</label>
+                           <input type="text" required value={profileForm.role} onChange={e => setProfileForm({...profileForm, role: e.target.value})} className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white text-sm" placeholder="Ej: Ejecutivo Ventas" />
+                        </div>
+                        <div>
+                           <label className="block text-xs font-medium text-slate-400 mb-1">Nueva Clave</label>
+                           <input type="text" required value={profileForm.password} onChange={e => setProfileForm({...profileForm, password: e.target.value})} className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white text-sm" />
+                        </div>
+
+                        <div className="flex gap-3 mt-4">
+                           <button 
+                             type="button"
+                             onClick={() => { setShowProfileSetup(false); setSelectedUserForLogin(null); }}
+                             className="flex-1 py-2 rounded border border-slate-600 text-slate-400 hover:bg-slate-700 transition-colors"
+                           >
+                             Cancelar
+                           </button>
+                           <button type="submit" className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-2 rounded font-medium transition-colors">
+                             Guardar
+                           </button>
+                        </div>
+                     </form>
+                   </div>
+                )}
+            </div>
+            
+            <p className="text-center text-xs text-slate-600 mt-8">
+              Versión 2.7.2 Local &bull; Sin clave (Modo Prueba)
+            </p>
+          </div>
+        </div>
+      );
     }
 
-    // Update Items (Delete old for this quote, add new)
-    // Remove existing items for this quote
-    dbItemsRef.current = dbItemsRef.current.filter(i => i.quoteId !== activeQuoteId);
-    // Add current state items
-    dbItemsRef.current.push(...items.map(i => ({ ...i, quoteId: activeQuoteId })));
-
-    // Update Costs (Delete old, add new)
-    dbCostsRef.current = dbCostsRef.current.filter(c => c.quoteId !== activeQuoteId);
-    dbCostsRef.current.push(...costs.map(c => ({ ...c, quoteId: activeQuoteId })));
-
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    
-    setIsSaving(false);
-    alert(`¡Cotización ${activeQuoteId} guardada exitosamente! Ahora puede buscarla por su ID.`);
-  };
-
-  const openStatusModal = () => {
-    setTempStatus(quoteStatus);
-    setTempDocs(quoteDocs);
-    setIsStatusModalOpen(true);
-  };
-
-  const saveStatusChanges = () => {
-    setQuoteStatus(tempStatus);
-    setQuoteDocs(tempDocs);
-    setIsStatusModalOpen(false);
-  };
-
-  const updateItem = (id: string, field: keyof QuoteItem, value: any) => {
-    setItems(items.map(i => i.id === id ? { ...i, [field]: value } : i));
-  };
-
-  const updateCost = (id: string, field: keyof QuoteCost, value: any) => {
-    setCosts(costs.map(c => c.id === id ? { ...c, [field]: value } : c));
-  };
-
-  const handleAddItem = () => {
-    const nextItemNum = items.length > 0 ? Math.max(...items.map(i => i.itemNumber)) + 1 : 1;
-    const itemToAdd: QuoteItem = {
-      id: crypto.randomUUID(),
-      quoteId: activeQuoteId,
-      itemNumber: nextItemNum,
-      image: 'https://placehold.co/100x100/png?text=Img', 
-      quantity: newItem.quantity || 1,
-      description: newItem.description || 'Nuevo Item',
-      unitPrice: Number(newItem.unitPrice) || 0
-    };
-    setItems([...items, itemToAdd]);
-    setNewItem({ quantity: 1, unitPrice: 0, description: '' });
-  };
-
-  const handleAddCost = () => {
-    const costToAdd: QuoteCost = {
-      id: crypto.randomUUID(),
-      quoteId: activeQuoteId,
-      itemNumber: Number(newCost.itemNumber) || 1,
-      code: newCost.code || '',
-      provider: newCost.provider || 'Nuevo Prov.',
-      quantity: newCost.quantity || 1,
-      unitCost: Number(newCost.unitCost) || 0,
-      discountPercent: Number(newCost.discountPercent) || 0
-    };
-    setCosts([...costs, costToAdd]);
-    setNewCost({ quantity: 1, unitCost: 0, discountPercent: 0, provider: '', code: '', itemNumber: 1 });
-  };
-
-  const deleteItem = (id: string) => setItems(items.filter(i => i.id !== id));
-  const deleteCost = (id: string) => setCosts(costs.filter(c => c.id !== id));
-
-  const formatCurrency = (val: number) => 
-    new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP' }).format(val);
-
-  const formatPercent = (val: number) => 
-    `${val.toFixed(2)}%`;
-
-  if (!currentUser) {
+    // Main App Render
     return (
-      <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6 font-sans">
-        <div className="w-full max-w-md">
-          <div className="text-center mb-8">
-            <div className="inline-flex items-center justify-center w-16 h-16 bg-indigo-600 rounded-2xl mb-4 shadow-lg shadow-indigo-500/30">
-               <svg className="w-8 h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-            </div>
-            <h1 className="text-3xl font-bold text-white mb-2">Cotizador Pro</h1>
-            <p className="text-slate-400">Selecciona tu usuario para ingresar</p>
-          </div>
-          
-          <div className="bg-slate-800 border border-slate-700 rounded-2xl shadow-xl overflow-hidden divide-y divide-slate-700">
-            {MOCK_USERS.map(user => (
-              <button 
-                key={user.id}
-                onClick={() => handleLogin(user)}
-                className="w-full p-4 flex items-center gap-4 hover:bg-slate-700/50 transition-colors text-left group"
-              >
-                <img src={user.avatar} alt={user.name} className="w-12 h-12 rounded-full border-2 border-slate-600 group-hover:border-indigo-500 transition-colors" />
-                <div>
-                  <div className="text-white font-medium group-hover:text-indigo-400 transition-colors">{user.name}</div>
-                  <div className="text-sm text-slate-500">{user.role}</div>
-                </div>
-                <div className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity text-indigo-400">
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
-                </div>
-              </button>
-            ))}
-          </div>
-          
-          <p className="text-center text-xs text-slate-600 mt-8">
-             Versión 2.6.3 &bull; DB: {DRIVE_DB_CONFIG.folderName}
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="min-h-screen bg-slate-900 text-slate-200 pb-20 font-sans selection:bg-indigo-500/30">
+      <div className="min-h-screen bg-slate-900 text-slate-200 pb-20 font-sans selection:bg-indigo-500/30">
       
       {/* TOP HEADER & SUMMARY */}
       <header className="bg-slate-800 border-b border-slate-700 sticky top-0 z-40 shadow-lg">
@@ -718,7 +1121,7 @@ export default function App() {
               </div>
               <div>
                 <h1 className="text-xl font-bold text-white tracking-tight">Cotizador Pro</h1>
-                <div className="flex items-center gap-2 text-xs text-slate-400">
+                <div className="flex items-center gap-3 text-xs text-slate-400">
                    <form onSubmit={handleSearch} className="flex items-center gap-2">
                      <span>ID:</span>
                      <div className="relative">
@@ -730,22 +1133,39 @@ export default function App() {
                         />
                      </div>
                      
-                     {/* SEARCH BAR */}
+                     {/* Creation Date Moved Here */}
+                     <div className="flex items-center gap-1 ml-2 border-l border-slate-600 pl-3">
+                        <svg className="w-3 h-3 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                        <span className="text-slate-300">
+                          {new Date(quoteDate).toLocaleDateString('es-CL', { day: '2-digit', month: 'short', year: 'numeric' })}
+                        </span>
+                     </div>
+
+                     {/* SEARCH BAR WITH DATALIST FOR 'SEARCH FROM FILE' EFFECT */}
                      <div className="relative flex items-center ml-4">
                        <input 
                          type="text" 
+                         list="quote-suggestions"
                          placeholder="Buscar ID..." 
                          value={searchTerm}
                          onChange={e => setSearchTerm(e.target.value)}
-                         className="bg-slate-900 border border-slate-600 rounded-l px-2 py-1 w-28 text-xs focus:border-indigo-500 outline-none transition-all"
+                         className="bg-slate-900 border border-slate-600 rounded-l px-2 py-1 w-40 text-xs focus:border-indigo-500 outline-none transition-all"
                        />
+                       <datalist id="quote-suggestions">
+                          {dbQuotesRef.current.map(q => {
+                             // Find client name for context
+                             const client = MOCK_CLIENTS.find(c => c.id === q.clientId);
+                             return <option key={q.id} value={q.id}>{client?.cliente || 'Sin Cliente'} - {q.status}</option>
+                          })}
+                       </datalist>
                        <button type="submit" className="bg-slate-700 border border-l-0 border-slate-600 rounded-r px-2 py-1 hover:bg-slate-600 transition-colors" title="Cargar Cotización">
                           <svg className="w-4 h-4 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                           </svg>
                        </button>
                      </div>
-                     <span className="text-[10px] text-slate-600 hidden sm:inline">(Ej: COT-4738, COT-1254)</span>
                    </form>
                 </div>
               </div>
@@ -755,10 +1175,10 @@ export default function App() {
               {/* User Profile */}
               <div className="flex items-center gap-3 pl-3 border-l border-slate-600/50 mr-3">
                  <div className="text-right hidden sm:block">
-                    <div className="text-xs font-bold text-white">{currentUser.name}</div>
-                    <div className="text-[10px] text-slate-400">{currentUser.role}</div>
+                    <div className="text-xs font-bold text-white">{currentUser?.name}</div>
+                    <div className="text-[10px] text-slate-400">{currentUser?.role}</div>
                  </div>
-                 <img src={currentUser.avatar} alt="User" className="w-8 h-8 rounded-full border border-slate-600" />
+                 <img src={currentUser?.avatar} alt="User" className="w-8 h-8 rounded-full border border-slate-600" />
                  <button onClick={handleLogout} title="Cerrar Sesión" className="text-slate-500 hover:text-red-400 transition-colors">
                     <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
                  </button>
@@ -798,12 +1218,12 @@ export default function App() {
                     <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
                       <path d="M19.479 10.092C19.267 6.141 16.006 3.5 12.5 3.5c-2.93 0-5.58 1.84-6.66 4.446C2.343 8.36 0 11.409 0 15c0 3.866 3.134 7 7 7h12c3.313 0 6-2.687 6-6 0-2.973-2.164-5.438-5.107-5.856l-.414-.052zM14 13v4h-4v-4H7l5-5 5 5h-3z"/>
                     </svg>
-                    <span className="hidden sm:inline">Drive</span>
+                    <span className="hidden sm:inline">Guardar</span>
                   </>
                 )}
               </button>
-
-              {/* New Quote Button */}
+              
+               {/* New Quote Button */}
               <button 
                 onClick={handleNewQuote}
                 className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors shadow-sm"
@@ -876,9 +1296,7 @@ export default function App() {
             <div className="flex items-center gap-2 mb-4 text-indigo-400">
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>
               <h2 className="font-semibold text-slate-200">Información Cliente</h2>
-              <span className="text-xs text-slate-500 ml-auto bg-slate-900 px-2 py-0.5 rounded" title="Fuente de Datos">
-                {DRIVE_DB_CONFIG.accountsSheetName}
-              </span>
+              {/* REMOVED SHEET LABEL */}
             </div>
             <div className="space-y-3">
               <div className="grid grid-cols-3 gap-4 items-center">
@@ -891,15 +1309,17 @@ export default function App() {
                    >
                       <option value="">Seleccionar Cliente...</option>
                       {MOCK_CLIENTS.map(c => (
-                         <option key={c.id} value={c.id}>{c.name}</option>
+                         <option key={c.id} value={c.id}>{c.cliente}</option>
                       ))}
                    </select>
                 </div>
               </div>
+
+              {/* REMOVED DATE FROM HERE - MOVED TO HEADER */}
+
               <div className="grid grid-cols-3 gap-4 items-center">
                 <label className="text-xs text-slate-500 font-medium uppercase flex items-center gap-1">
                   Contacto 
-                  {/* Indicator for Contact Source */}
                   <svg className="w-3 h-3 text-slate-600" viewBox="0 0 24 24" fill="currentColor">
                      <title>{`Origen: ${DRIVE_DB_CONFIG.contactsSheetName}`}</title>
                      <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-9 14l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
@@ -925,6 +1345,7 @@ export default function App() {
                    </select>
                 </div>
               </div>
+              
               <div className="grid grid-cols-3 gap-4 items-center">
                 <label className="text-xs text-slate-500 font-medium uppercase">ID Mercado P.</label>
                 <div className="col-span-2">
@@ -944,15 +1365,12 @@ export default function App() {
             <div className="flex items-center gap-2 mb-4 text-pink-400">
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
               <h2 className="font-semibold text-slate-200">Ejecutiva/o Comercial</h2>
-              <span className="text-xs text-slate-500 ml-auto bg-slate-900 px-2 py-0.5 rounded" title="Fuente: BD_Ecomoving">
-                {DRIVE_DB_CONFIG.usersSheetName}
-              </span>
+              {/* REMOVED SHEET LABEL */}
             </div>
             <div className="space-y-3">
                <div className="grid grid-cols-3 gap-4 items-center">
                 <label className="text-xs text-slate-500 font-medium uppercase">Nombre</label>
                 <div className="col-span-2">
-                  {/* Read only since it comes from user login */}
                   <EditableInput value={executiveInfo.name} onChange={() => {}} readOnly={true} className="text-slate-400 cursor-not-allowed" />
                 </div>
               </div>
@@ -1152,10 +1570,10 @@ export default function App() {
                    <td className="p-3">
                      <input type="number" value={newCost.discountPercent} onChange={e => setNewCost({...newCost, discountPercent: Number(e.target.value)})} className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1 text-right text-xs" placeholder="%" />
                   </td>
-                  <td className="p-3 text-right text-slate-500 font-mono text-xs">$0</td>
+                  <td className="p-3"></td>
                   <td className="p-3 text-center">
-                    <button onClick={handleAddCost} className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-2 py-1 rounded font-medium transition-colors shadow-sm shadow-emerald-500/20">
-                      Agregar
+                    <button onClick={handleAddCost} className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-2 py-1 rounded font-medium transition-colors">
+                      +
                     </button>
                   </td>
                 </tr>
@@ -1181,7 +1599,7 @@ export default function App() {
               <div>
                 <label className="block text-xs font-medium text-slate-400 uppercase mb-1">Estado Cotización</label>
                 <div className="grid grid-cols-2 gap-2">
-                  {(['Pendiente', 'Enviada', 'Aprobada', 'Rechazada', 'Facturada'] as QuoteStatus[]).map(s => (
+                  {(['Pendiente', 'Producción', 'Despachada', 'Facturada', 'Perdida'] as QuoteStatus[]).map(s => (
                      <button
                         key={s}
                         onClick={() => setTempStatus(s)}
