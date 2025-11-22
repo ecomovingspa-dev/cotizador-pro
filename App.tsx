@@ -4,8 +4,14 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 // 🚨 CONFIGURACIÓN DE CONEXIÓN GOOGLE (FINAL)
 // =================================================================
 
+// 🔑 TU API KEY (La pieza que faltaba)
+const API_KEY: string = 'AIzaSyCShAoumSMfgaSHfx07Gc9eOJWNUev8IsE';
+
+// 🆔 TUS CREDENCIALES
 const CLIENT_ID: string = '367886195210-kcoq4srkcsei95mbs9rimg4dg1le93l7.apps.googleusercontent.com'; 
 const SPREADSHEET_ID: string = '1jpAhYMnc7xdZ22Wh6SoC9ygTb1lIRA6AAchvmk691Z0'; 
+
+// ⚙️ PERMISOS Y CONFIGURACIÓN
 const SCOPES: string = 'https://www.googleapis.com/auth/spreadsheets email profile openid';
 const DISCOVERY_DOCS: string[] = ['https://sheets.googleapis.com/$discovery/rest?version=v4'];
 
@@ -41,7 +47,6 @@ interface QuoteDocuments { oc: string; guia: string; factura: string; }
 type QuoteStatus = 'Pendiente' | 'Producción' | 'Despachada' | 'Facturada' | 'Perdida';
 
 // --- Mock Data (Para Búsqueda y Listas Desplegables) ---
-// Nota: En una versión futura, esto también se podría leer desde Sheets con 'values.get'
 
 const MOCK_CLIENTS: Client[] = [
   { id: 'c1', cliente: 'Ecomoving Ltda.', sector: 'Retail', segmento: 'Grande', web: 'www.ecomoving.cl', estado: 'Activo', correo: 'contacto@ecomoving.cl', telefono: '+56 2 2233 4455', ciudad: 'Santiago' },
@@ -114,7 +119,7 @@ export default function App() {
             gapiLoaded.current = true;
             window.gapi.load('client:auth2', () => {
                 window.gapi.client.init({
-                    apiKey: null,
+                    apiKey: API_KEY, // 🔑 ¡AQUÍ SE USA TU NUEVA API KEY!
                     clientId: CLIENT_ID,
                     discoveryDocs: DISCOVERY_DOCS,
                     scope: SCOPES
