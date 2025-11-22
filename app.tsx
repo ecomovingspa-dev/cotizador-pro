@@ -1,19 +1,37 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 
 // =================================================================
-// 🚨 CONFIGURACIÓN DE CONEXIÓN GOOGLE (FINAL)
+// 🚨 CONFIGURACIÓN DE CONEXIÓN GOOGLE (ARQUITECTURA MULTI-ARCHIVO)
 // =================================================================
 
 const API_KEY: string = 'AIzaSyCShAoumSMfgaSHfx07Gc9eOJWNUev8IsE'; 
 const CLIENT_ID: string = '367886195210-kcoq4srkcsei95mbs9rimg4dg1le93l7.apps.googleusercontent.com'; 
-const SPREADSHEET_ID: string = '1jpAhYMnc7xdZ22Wh6SoC9ygTb1lIRA6AAchvmk691Z0'; 
 const SCOPES: string = 'https://www.googleapis.com/auth/spreadsheets email profile openid';
 const DISCOVERY_DOCS: string[] = ['https://sheets.googleapis.com/$discovery/rest?version=v4'];
 
-const SHEET_NAMES = {
-    QUOTES: 'Maestro_Cotizaciones',
-    ITEMS: 'Items',
-    COSTS: 'Costos'
+// 🗂️ MAPA DE ARCHIVOS (BASE DE DATOS DISTRIBUIDA)
+// IDs extraídos de tus imágenes
+const DB_CONFIG = {
+    QUOTES: {
+        fileId: '1pU9mnO7NXHFp9PUVP4O548SO79KkJrFbNvRHSppv9-8', 
+        sheetName: 'Maestro_Cotizaciones'
+    },
+    ITEMS: {
+        fileId: '1scu3ndKCAUqKKlZBEWiYUyWYghtQIBgmTknw5A4zqTo', 
+        sheetName: 'Maestro_Items'
+    },
+    COSTS: {
+        fileId: '1DjUKP0vNgqPWs0FN94GW1GndnU1a9NaolKsZxLsBZ4Y', 
+        sheetName: 'Maestro_Costos'
+    },
+    CLIENTS: {
+        fileId: '1jpAhYMnc7xdZ22Wh6SoC9ygTb1lIRA6AAchvmk691Z0', 
+        sheetName: 'Maestro_Cuentas'
+    },
+    CONTACTS: {
+        fileId: '1V0FRA2gro7yPwPXDPEA8oq1H9oivlNQ0FrLJnL8qAIA', 
+        sheetName: 'Maestro_Contactos'
+    }
 };
 
 declare global {
@@ -33,7 +51,7 @@ interface QuoteCost { id: string; quoteId: string; itemNumber: number; code: str
 interface QuoteDocuments { oc: string; guia: string; factura: string; }
 type QuoteStatus = 'Pendiente' | 'Producción' | 'Despachada' | 'Facturada' | 'Perdida';
 
-// --- Mock Data ---
+// --- Mock Data (Para funcionamiento local de UI) ---
 
 const MOCK_CLIENTS: Client[] = [
   { id: 'c1', cliente: 'Ecomoving Ltda.', sector: 'Retail', segmento: 'Grande', web: 'www.ecomoving.cl', estado: 'Activo', correo: 'contacto@ecomoving.cl', telefono: '+56 2 2233 4455', ciudad: 'Santiago' },
@@ -88,10 +106,9 @@ export default function App() {
     const [newItem, setNewItem] = useState<Partial<QuoteItem>>({ quantity: 1, unitPrice: 0, description: '' });
     const [newCost, setNewCost] = useState<Partial<QuoteCost>>({ quantity: 1, unitCost: 0, discountPercent: 0, provider: '', code: '', itemNumber: 1 });
 
-    // --- 🚀 NUEVA INICIALIZACIÓN DE GOOGLE (GIS + GAPI) ---
+    // --- INICIALIZACIÓN GOOGLE (GIS + GAPI) ---
     useEffect(() => {
         const initializeGoogle = () => {
-            // 1. Inicializar Cliente de Token (Para Login)
             if (window.google) {
                 const client = window.google.accounts.oauth2.initTokenClient({
                     client_id: CLIENT_ID,
@@ -99,34 +116,26 @@ export default function App() {
                     callback: async (response: any) => {
                         if (response.access_token) {
                             setIsSignedIn(true);
-                            // Setear token en GAPI para usar Sheets
-                            if (window.gapi.client) {
-                                window.gapi.client.setToken(response);
-                            }
-                            // Obtener perfil del usuario manualmente
-                            try {
-                                const userInfoReq = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-                                    headers: { Authorization: `Bearer ${response.access_token}` }
-                                });
-                                const userInfo = await userInfoReq.json();
-                                setCurrentUser({
-                                    id: userInfo.sub,
-                                    name: userInfo.name,
-                                    email: userInfo.email,
-                                    avatar: userInfo.picture,
-                                    role: 'Usuario Google'
-                                });
-                                setExecutiveInfo({ name: userInfo.name, email: userInfo.email, phone: '' });
-                            } catch (error) {
-                                console.error("Error obteniendo perfil:", error);
-                            }
+                            if (window.gapi.client) window.gapi.client.setToken(response);
+                            
+                            const userInfoReq = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+                                headers: { Authorization: `Bearer ${response.access_token}` }
+                            });
+                            const userInfo = await userInfoReq.json();
+                            setCurrentUser({
+                                id: userInfo.sub,
+                                name: userInfo.name,
+                                email: userInfo.email,
+                                avatar: userInfo.picture,
+                                role: 'Usuario Google'
+                            });
+                            setExecutiveInfo({ name: userInfo.name, email: userInfo.email, phone: '' });
                         }
                     },
                 });
                 setTokenClient(client);
             }
 
-            // 2. Inicializar GAPI (Para Sheets API) con API KEY
             if (window.gapi) {
                 window.gapi.load('client', async () => {
                     await window.gapi.client.init({
@@ -136,19 +145,13 @@ export default function App() {
                 });
             }
         };
-
-        // Pequeño delay para asegurar que los scripts de index.html cargaron
         const timer = setTimeout(initializeGoogle, 1000);
         return () => clearTimeout(timer);
     }, []);
 
     const handleLogin = () => {
-        if (tokenClient) {
-            // Esto abre el popup de Google moderno
-            tokenClient.requestAccessToken();
-        } else {
-            alert("El sistema de Google aún está cargando, espera unos segundos...");
-        }
+        if (tokenClient) tokenClient.requestAccessToken();
+        else alert("Cargando Google... intente en unos segundos");
     };
 
     const handleLogout = () => {
@@ -189,12 +192,16 @@ export default function App() {
       };
     }, [items, costs, taxRate]);
 
+    // --- GUARDADO MULTI-ARCHIVO (LÓGICA ACTUALIZADA) ---
     const handleSaveToDrive = async () => {
         if (!currentUser) return alert("Debes iniciar sesión.");
         setIsSaving(true);
         const timestamp = new Date().toISOString();
 
         try {
+            // 1. PREPARAR DATOS
+            
+            // Archivo: Cotizaciones (Maestro_Cotizaciones)
             const MASTER_KEYS = ['id', 'createdAt', 'clientId', 'clientName', 'contactName', 'marketId', 'executiveName', 'executiveEmail', 'status', 'oc', 'guia', 'factura', 'neto', 'iva', 'total', 'costo_total', 'margen_porcentaje'];
             const masterData = {
                 id: activeQuoteId, createdAt: timestamp, clientId: clientInfo.clientId, clientName: clientInfo.clientName,
@@ -204,28 +211,43 @@ export default function App() {
                 costo_total: globalTotals.cost, margen_porcentaje: globalTotals.marginPercent.toFixed(2)
             };
             const masterRow = objectToArray(masterData, MASTER_KEYS);
+
+            // Archivo: Items (Maestro_Items)
             const ITEMS_KEYS = ['id', 'quoteId', 'itemNumber', 'quantity', 'description', 'unitPrice', 'total'];
             const itemRows = items.map(i => objectToArray({ ...i, quoteId: activeQuoteId, total: i.quantity * i.unitPrice }, ITEMS_KEYS));
+
+            // Archivo: Costos (Maestro_Costos)
             const COSTS_KEYS = ['id', 'quoteId', 'itemNumber', 'code', 'provider', 'quantity', 'unitCost', 'discountPercent', 'total'];
             const costRows = costs.map(c => objectToArray({ ...c, quoteId: activeQuoteId, total: (c.quantity * c.unitCost) * (1 - c.discountPercent/100) }, COSTS_KEYS));
 
-            const appendToSheet = async (range: string, values: any[][]) => {
+            // 2. FUNCIÓN DE APENDIZADO (Soporta ID de archivo dinámico)
+            const appendToSheet = async (fileId: string, sheetName: string, values: any[][]) => {
                 if (values.length === 0) return;
+                if (!fileId || fileId.includes('REEMPLAZAR')) {
+                    console.error(`Falta ID válido para ${sheetName}`);
+                    return; 
+                }
                 await window.gapi.client.sheets.spreadsheets.values.append({
-                    spreadsheetId: SPREADSHEET_ID, range: range, valueInputOption: 'USER_ENTERED', resource: { values }
+                    spreadsheetId: fileId, 
+                    range: `${sheetName}!A1`, // Escribe al final de la hoja especificada
+                    valueInputOption: 'USER_ENTERED', 
+                    resource: { values }
                 });
             };
 
-            await appendToSheet(`${SHEET_NAMES.QUOTES}!A1`, [masterRow]);
-            await appendToSheet(`${SHEET_NAMES.ITEMS}!A1`, itemRows);
-            await appendToSheet(`${SHEET_NAMES.COSTS}!A1`, costRows);
+            // 3. EJECUTAR ESCRITURA EN PARALELO A DIFERENTES ARCHIVOS
+            await Promise.all([
+                appendToSheet(DB_CONFIG.QUOTES.fileId, DB_CONFIG.QUOTES.sheetName, [masterRow]),
+                appendToSheet(DB_CONFIG.ITEMS.fileId, DB_CONFIG.ITEMS.sheetName, itemRows),
+                appendToSheet(DB_CONFIG.COSTS.fileId, DB_CONFIG.COSTS.sheetName, costRows)
+            ]);
 
             setIsSaving(false);
-            alert(`¡Cotización ${activeQuoteId} guardada en Google Sheets exitosamente!`);
+            alert(`¡Cotización ${activeQuoteId} guardada en el sistema (múltiples archivos) exitosamente!`);
         } catch (error: any) {
             setIsSaving(false);
             console.error("Error guardando:", error);
-            alert("Error al guardar. Verifica que iniciaste sesión y que las hojas existen en el Excel.");
+            alert("Error al guardar. Revisa la consola para ver qué archivo falló.");
         }
     };
 
